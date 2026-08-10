@@ -25,6 +25,9 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           # Issues from users without write access to the repo still get triaged
           allowed_non_write_users: "*"
+          # The /triage-issue command (.claude/commands/triage-issue.md) applies labels
+          # and posts a diagnosis comment formatted as GitHub-flavored Markdown so it
+          # renders correctly (bold, code spans, links) instead of as raw text.
           prompt: "/triage-issue REPO: ${{ github.repository }} ISSUE_NUMBER: ${{ github.event.issue.number }}"
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://code.claude.com/docs/en/cli-reference for available options

@@ -42,6 +42,7 @@ TASK OVERVIEW:
      - What's missing to act on it, if anything (repro steps, logs, environment, expected vs actual)
      - A note + link if it looks like a duplicate of another open issue
    - Keep it concise (roughly 4-8 lines), factual, no filler or pleasantries
+   - Format the body as GitHub-flavored Markdown so it renders correctly as a comment: use `**bold**` for labels like severity, backtick `code spans` for file/function names, and a Markdown link (`[#123](url)`) when referencing another issue — not raw/plain text
    - End with: `_Automated triage by Claude — verify before acting._`
 
 IMPORTANT GUIDELINES:
