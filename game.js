@@ -13,6 +13,7 @@ const COLORS = [
   '#e57373', // Z - red
   '#90caf9', // J - pale blue
   '#ffb74d', // L - orange
+  '#b0bec5', // Tuerca - acero
 ];
 
 const PIECES = [
@@ -24,7 +25,12 @@ const PIECES = [
   [[5,5,0],[0,5,5],[0,0,0]],                  // Z
   [[6,0,0],[6,6,6],[0,0,0]],                  // J
   [[0,0,7],[7,7,7],[0,0,0]],                  // L
+  [[8,8,8],[8,0,8],[8,8,8]],                  // Tuerca (hueco central)
 ];
+
+const NUT = 8;    // índice de tipo/color de la tuerca
+const HOLE = 9;   // marcador de hueco en el tablero: cuenta como lleno, se dibuja vacío
+const NUT_BONUS = 50;
 
 const LINE_SCORES = [0, 100, 300, 500, 800];
 
@@ -52,7 +58,7 @@ function createBoard() {
 }
 
 function randomPiece() {
-  const type = Math.floor(Math.random() * 7) + 1;
+  const type = Math.floor(Math.random() * (PIECES.length - 1)) + 1;
   const shape = PIECES[type].map(row => [...row]);
   return { type, shape, x: Math.floor(COLS / 2) - Math.floor(shape[0].length / 2), y: 0 };
 }
@@ -96,6 +102,13 @@ function merge() {
     for (let c = 0; c < current.shape[r].length; c++)
       if (current.shape[r][c])
         board[current.y + r][current.x + c] = current.shape[r][c];
+
+  if (current.type === NUT) {
+    for (let r = 0; r < current.shape.length; r++)
+      for (let c = 0; c < current.shape[r].length; c++)
+        if (!current.shape[r][c] && board[current.y + r][current.x + c] === 0)
+          board[current.y + r][current.x + c] = HOLE;
+  }
 }
 
 function clearLines() {
@@ -141,6 +154,10 @@ function softDrop() {
 }
 
 function lockPiece() {
+  if (current.type === NUT) {
+    score += NUT_BONUS * level;
+    updateHUD();
+  }
   merge();
   clearLines();
   spawn();
@@ -163,13 +180,41 @@ function updateHUD() {
 
 function drawBlock(context, x, y, colorIndex, size, alpha) {
   if (!colorIndex) return;
-  const color = COLORS[colorIndex];
   context.globalAlpha = alpha ?? 1;
-  context.fillStyle = color;
-  context.fillRect(x * size + 1, y * size + 1, size - 2, size - 2);
+  const px = x * size + 1, py = y * size + 1, s = size - 2;
+
+  if (colorIndex === HOLE) {
+    // hueco de la tuerca: se insinúa, no se ve como bloque sólido
+    context.fillStyle = 'rgba(96,125,139,0.18)';
+    context.fillRect(px, py, s, s);
+    context.save();
+    context.setLineDash([3, 3]);
+    context.strokeStyle = 'rgba(96,125,139,0.6)';
+    context.lineWidth = 1;
+    context.strokeRect(px + 0.5, py + 0.5, s - 1, s - 1);
+    context.restore();
+    context.globalAlpha = 1;
+    return;
+  }
+
+  if (colorIndex === NUT) {
+    const gradient = context.createLinearGradient(px, py, px + s, py + s);
+    gradient.addColorStop(0, '#eceff1');
+    gradient.addColorStop(0.5, '#b0bec5');
+    gradient.addColorStop(1, '#607d8b');
+    context.fillStyle = gradient;
+    context.fillRect(px, py, s, s);
+    context.strokeStyle = 'rgba(38,50,56,0.55)';
+    context.lineWidth = 1;
+    context.strokeRect(px + 0.5, py + 0.5, s - 1, s - 1);
+  } else {
+    context.fillStyle = COLORS[colorIndex];
+    context.fillRect(px, py, s, s);
+  }
+
   // highlight
   context.fillStyle = 'rgba(255,255,255,0.12)';
-  context.fillRect(x * size + 1, y * size + 1, size - 2, 4);
+  context.fillRect(px, py, s, 4);
   context.globalAlpha = 1;
 }
 
