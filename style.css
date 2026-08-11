@@ -163,6 +163,12 @@ body {
   letter-spacing: 1px;
 }
 
+#special {
+  font-size: 15px;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+
 #next-canvas {
   display: block;
   border: 1px solid var(--board-border);
