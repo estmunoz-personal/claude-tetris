@@ -58,6 +58,15 @@ body {
   position: relative;
 }
 
+.game-title {
+  text-align: center;
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: 4px;
+  color: var(--value-color);
+  margin-bottom: 12px;
+}
+
 .theme-toggle {
   display: flex;
   justify-content: flex-end;
