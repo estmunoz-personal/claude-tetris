@@ -36,6 +36,8 @@ Es una versión jugable del Tetris clásico con todas las mecánicas que esperar
 - Tablero de **10 × 20** celdas.
 - Las **7 piezas estándar** (I, O, T, S, Z, J, L) con colores diferenciados.
 - **La Tuerca**: una octava pieza de reto, un cuadrado de 3×3 con acabado metálico y un hueco vacío en el centro. Sale con la misma probabilidad que el resto y otorga un bonus de `50 × nivel` al bloquearse.
+- **La Bomba** 💣: pieza especial de 1 bloque que aparece cada **10 piezas colocadas**. Al bloquearse, destruye el área de 3×3 celdas centrada en su posición (recortada en los bordes del tablero) en vez de fusionarse con él.
+- **El Rayo** ⚡: pieza especial de 1 bloque que aparece **3 piezas después de cada Bomba**. Al bloquearse, destruye la fila y la columna completas que pasan por su posición.
 - **Rotación** con _wall kicks_ básicos (pequeños desplazamientos para que la pieza pueda rotar pegada a la pared).
 - **Soft drop** (bajada acelerada) y **hard drop** (caída instantánea).
 - **Pieza fantasma** (_ghost piece_): muestra dónde aterrizará la pieza actual.
@@ -98,7 +100,7 @@ El juego se compone de tres archivos que cooperan:
 Define la estructura visual:
 
 - Un `<canvas id="board">` de **300 × 600** píxeles donde se renderiza el tablero.
-- Un panel lateral con `SCORE`, `LINES`, `LEVEL`, vista de la siguiente pieza y la lista de controles.
+- Un panel lateral con `SCORE`, `LINES`, `LEVEL`, `ESPECIAL` (cuenta atrás hasta la próxima Bomba o Rayo), vista de la siguiente pieza y la lista de controles.
 - Un overlay para los estados **PAUSA** y **GAME OVER**.
 
 ### 2. `style.css`
@@ -109,8 +111,9 @@ Aporta el aspecto visual con estética _dark / retro arcade_: fondo oscuro, tipo
 
 Contiene toda la lógica del juego. A grandes rasgos:
 
-- **Modelo del tablero**: una matriz `ROWS × COLS` donde cada celda guarda `0` (vacía), un índice de color (1–8) que identifica la pieza, o `9` (`HOLE`), el marcador especial del hueco de la Tuerca.
+- **Modelo del tablero**: una matriz `ROWS × COLS` donde cada celda guarda `0` (vacía), un índice de color (1–10) que identifica la pieza, o `99` (`HOLE`), el marcador especial del hueco de la Tuerca.
 - **Piezas**: definidas como matrices cuadradas. Para rotar se calcula la transposición + reverso de filas (`rotateCW`).
+- **Ciclo de piezas especiales** (`nextPiece`): un contador de piezas generadas (`pieceCount`) decide cuándo toca Bomba o Rayo en vez de sortear una pieza normal (`randomPiece`, que sólo elige entre las 8 primeras). El ciclo es fijo: Bomba en la pieza 10, Rayo 3 piezas después (la 13), y vuelve a contar 10 piezas hasta la siguiente Bomba.
 - **Detección de colisiones** (`collide`): comprueba que ninguna celda de la pieza salga del tablero ni se solape con bloques ya fijados.
 - **Wall kicks** (`tryRotate`): si la rotación choca, intenta desplazar la pieza ±1 y ±2 columnas antes de descartar el giro.
 - **Game loop** (`loop`): basado en `requestAnimationFrame`, acumula el tiempo transcurrido y baja la pieza una fila cuando se supera `dropInterval`.
@@ -118,14 +121,15 @@ Contiene toda la lógica del juego. A grandes rasgos:
 - **Puntuación**: usa la tabla clásica `[0, 100, 300, 500, 800]` multiplicada por el nivel actual; el hard drop suma 2 puntos por celda recorrida y el soft drop 1 punto por fila.
 - **Nivel y velocidad**: el nivel sube cada 10 líneas; la velocidad de caída se calcula como `max(100, 1000 − (level − 1) × 90)` milisegundos.
 - **Ghost piece** (`ghostY`): proyecta la posición final de la pieza actual hacia abajo y la dibuja con `globalAlpha = 0.2`.
-- **La Tuerca** (`NUT` = 8): pieza `[[8,8,8],[8,0,8],[8,8,8]]`. Su celda central vacía se sella al bloquearla: `merge()` escribe ahí el marcador `HOLE` (9) en vez de dejar la celda en `0`. `HOLE` se renderiza como un hueco translúcido con borde punteado, pero cuenta como celda llena para `clearLines()` — así una fila que atraviese el hueco sí se puede limpiar, y no queda una fila muerta para siempre. Al bloquear la pieza, `lockPiece()` suma `NUT_BONUS × level` (50 × nivel) antes de contar líneas.
+- **La Tuerca** (`NUT` = 8): pieza `[[8,8,8],[8,0,8],[8,8,8]]`. Su celda central vacía se sella al bloquearla: `merge()` escribe ahí el marcador `HOLE` (99) en vez de dejar la celda en `0`. `HOLE` se renderiza como un hueco translúcido con borde punteado, pero cuenta como celda llena para `clearLines()` — así una fila que atraviese el hueco sí se puede limpiar, y no queda una fila muerta para siempre. Al bloquear la pieza, `lockPiece()` suma `NUT_BONUS × level` (50 × nivel) antes de contar líneas.
+- **La Bomba** (`BOMB` = 9) y **el Rayo** (`RAY` = 10): piezas de un solo bloque que no se fusionan con el tablero. Al bloquearse, `lockPiece()` desvía la jugada a `explode()` (Bomba: borra el 3×3 centrado en su celda, recortado a los límites del tablero) o `strike()` (Rayo: borra toda la fila y toda la columna que pasan por su celda). Ambas funciones devuelven el número de celdas destruidas, que se traduce en puntos (`BOMB_CELL_SCORE` / `RAY_CELL_SCORE`, × nivel). No hay gravedad: los bloques que quedan sobre el hueco no caen, y una fila vaciada por el Rayo no cuenta como línea completada.
 
 ### Flujo del juego
 
 ```
 init()
   ├─ createBoard()                  → matriz vacía
-  ├─ next = randomPiece()
+  ├─ next = nextPiece()             → normal, o Bomba/Rayo según el ciclo
   ├─ spawn()                        → mueve next a current y genera nueva next
   └─ requestAnimationFrame(loop)
         ↓
@@ -175,10 +179,14 @@ Algunos parámetros fáciles de tunear en `game.js`:
 | `COLS`         | Columnas del tablero                     | `10`                  |
 | `ROWS`         | Filas del tablero                        | `20`                  |
 | `BLOCK`        | Tamaño en píxeles de cada celda          | `30`                  |
-| `COLORS`       | Paleta de colores por tipo de pieza      | 8 colores             |
+| `COLORS`       | Paleta de colores por tipo de pieza      | 10 colores             |
 | `LINE_SCORES`  | Puntos por 1, 2, 3 o 4 líneas eliminadas | `[0,100,300,500,800]` |
 | `dropInterval` | Velocidad inicial de caída en ms         | `1000`                |
 | `NUT_BONUS`    | Bonus al bloquear la Tuerca (× nivel)    | `50`                  |
+| `BOMB_EVERY`   | Piezas colocadas hasta la próxima Bomba  | `10`                  |
+| `RAY_AFTER_BOMB` | Piezas colocadas tras la Bomba hasta el Rayo | `3`                |
+| `BOMB_CELL_SCORE` | Puntos por celda destruida por la Bomba (× nivel) | `20`          |
+| `RAY_CELL_SCORE`  | Puntos por celda destruida por el Rayo (× nivel)  | `10`          |
 
 > Si cambias `COLS`, `ROWS` o `BLOCK`, recuerda ajustar también `width` y `height` del `<canvas id="board">` en `index.html` para que coincida (`COLS × BLOCK` × `ROWS × BLOCK`).
 

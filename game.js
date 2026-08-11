@@ -14,6 +14,8 @@ const COLORS = [
   '#90caf9', // J - pale blue
   '#ffb74d', // L - orange
   '#b0bec5', // Tuerca - acero
+  '#37474f', // Bomba - carbón
+  '#fff176', // Rayo - amarillo eléctrico
 ];
 
 const PIECES = [
@@ -26,11 +28,21 @@ const PIECES = [
   [[6,0,0],[6,6,6],[0,0,0]],                  // J
   [[0,0,7],[7,7,7],[0,0,0]],                  // L
   [[8,8,8],[8,0,8],[8,8,8]],                  // Tuerca (hueco central)
+  [[9]],                                       // Bomba
+  [[10]],                                      // Rayo
 ];
 
 const NUT = 8;    // índice de tipo/color de la tuerca
-const HOLE = 9;   // marcador de hueco en el tablero: cuenta como lleno, se dibuja vacío
+const BOMB = 9;   // índice de tipo/color de la bomba
+const RAY = 10;   // índice de tipo/color del rayo
+const HOLE = 99;  // marcador de hueco en el tablero: cuenta como lleno, se dibuja vacío
 const NUT_BONUS = 50;
+
+const LAST_RANDOM = NUT;        // las especiales (bomba/rayo) no entran en el sorteo
+const BOMB_EVERY = 10;          // piezas colocadas hasta la próxima bomba
+const RAY_AFTER_BOMB = 3;       // piezas colocadas tras la bomba hasta el rayo
+const BOMB_CELL_SCORE = 20;     // puntos por celda destruida por la bomba (x nivel)
+const RAY_CELL_SCORE = 10;      // puntos por celda destruida por el rayo (x nivel)
 
 const LINE_SCORES = [0, 100, 300, 500, 800];
 
@@ -41,6 +53,7 @@ const nextCtx = nextCanvas.getContext('2d');
 const scoreEl = document.getElementById('score');
 const linesEl = document.getElementById('lines');
 const levelEl = document.getElementById('level');
+const specialEl = document.getElementById('special');
 const overlay = document.getElementById('overlay');
 const overlayTitle = document.getElementById('overlay-title');
 const overlayScore = document.getElementById('overlay-score');
@@ -52,15 +65,34 @@ const GRID_COLORS = { dark: '#22222e', light: '#dcdce6' };
 let gridColor = GRID_COLORS.dark;
 
 let board, current, next, score, lines, level, paused, gameOver, lastTime, dropAccum, dropInterval, animId;
+let pieceCount, bombAt, rayAt;
 
 function createBoard() {
   return Array.from({ length: ROWS }, () => new Array(COLS).fill(0));
 }
 
-function randomPiece() {
-  const type = Math.floor(Math.random() * (PIECES.length - 1)) + 1;
+function makePiece(type) {
   const shape = PIECES[type].map(row => [...row]);
   return { type, shape, x: Math.floor(COLS / 2) - Math.floor(shape[0].length / 2), y: 0 };
+}
+
+function randomPiece() {
+  return makePiece(Math.floor(Math.random() * LAST_RANDOM) + 1);
+}
+
+// Decide la siguiente pieza según el ciclo bomba -> (3 piezas) -> rayo -> (10 piezas) -> bomba...
+function nextPiece() {
+  pieceCount++;
+  if (rayAt && pieceCount === rayAt) {
+    rayAt = 0;
+    bombAt = pieceCount + BOMB_EVERY;
+    return makePiece(RAY);
+  }
+  if (pieceCount === bombAt) {
+    rayAt = pieceCount + RAY_AFTER_BOMB;
+    return makePiece(BOMB);
+  }
+  return randomPiece();
 }
 
 function collide(shape, ox, oy) {
@@ -130,6 +162,23 @@ function clearLines() {
   }
 }
 
+// Bomba: destruye el área 3x3 centrada en (cx, cy), recortada a los límites del tablero.
+function explode(cx, cy) {
+  let hit = 0;
+  for (let r = cy - 1; r <= cy + 1; r++)
+    for (let c = cx - 1; c <= cx + 1; c++)
+      if (r >= 0 && r < ROWS && c >= 0 && c < COLS && board[r][c]) { board[r][c] = 0; hit++; }
+  return hit;
+}
+
+// Rayo: destruye la fila y la columna completas que pasan por (cx, cy).
+function strike(cx, cy) {
+  let hit = 0;
+  for (let c = 0; c < COLS; c++) if (board[cy][c]) { board[cy][c] = 0; hit++; }
+  for (let r = 0; r < ROWS; r++) if (board[r][cx]) { board[r][cx] = 0; hit++; }
+  return hit;
+}
+
 function ghostY() {
   let gy = current.y;
   while (!collide(current.shape, current.x, gy + 1)) gy++;
@@ -154,18 +203,22 @@ function softDrop() {
 }
 
 function lockPiece() {
-  if (current.type === NUT) {
-    score += NUT_BONUS * level;
-    updateHUD();
+  if (current.type === BOMB) {
+    score += explode(current.x, current.y) * BOMB_CELL_SCORE * level;
+  } else if (current.type === RAY) {
+    score += strike(current.x, current.y) * RAY_CELL_SCORE * level;
+  } else {
+    if (current.type === NUT) score += NUT_BONUS * level;
+    merge();
   }
-  merge();
+  updateHUD();
   clearLines();
   spawn();
 }
 
 function spawn() {
   current = next;
-  next = randomPiece();
+  next = nextPiece();
   if (collide(current.shape, current.x, current.y)) {
     endGame();
   }
@@ -176,6 +229,13 @@ function updateHUD() {
   scoreEl.textContent = score.toLocaleString();
   linesEl.textContent = lines;
   levelEl.textContent = level;
+  if (specialEl) specialEl.textContent = specialStatus();
+}
+
+// Texto del indicador ESPECIAL: qué pieza especial llega y en cuántas piezas.
+function specialStatus() {
+  if (rayAt) return `Rayo en ${rayAt - pieceCount}`;
+  return `Bomba en ${bombAt - pieceCount}`;
 }
 
 function drawBlock(context, x, y, colorIndex, size, alpha) {
@@ -193,6 +253,55 @@ function drawBlock(context, x, y, colorIndex, size, alpha) {
     context.lineWidth = 1;
     context.strokeRect(px + 0.5, py + 0.5, s - 1, s - 1);
     context.restore();
+    context.globalAlpha = 1;
+    return;
+  }
+
+  if (colorIndex === BOMB) {
+    const cx = px + s / 2, cy = py + s / 2, radius = s * 0.38;
+    // mecha
+    context.strokeStyle = '#8d6e63';
+    context.lineWidth = 2;
+    context.beginPath();
+    context.moveTo(cx, cy - radius);
+    context.lineTo(cx + s * 0.22, py - 2);
+    context.stroke();
+    // chispa
+    context.fillStyle = '#ffb74d';
+    context.beginPath();
+    context.arc(cx + s * 0.22, py - 2, 2, 0, Math.PI * 2);
+    context.fill();
+    // cuerpo
+    context.fillStyle = COLORS[BOMB];
+    context.beginPath();
+    context.arc(cx, cy, radius, 0, Math.PI * 2);
+    context.fill();
+    // brillo
+    context.fillStyle = 'rgba(255,255,255,0.25)';
+    context.beginPath();
+    context.arc(cx - radius * 0.35, cy - radius * 0.35, radius * 0.3, 0, Math.PI * 2);
+    context.fill();
+    context.globalAlpha = 1;
+    return;
+  }
+
+  if (colorIndex === RAY) {
+    context.fillStyle = COLORS[RAY];
+    context.fillRect(px, py, s, s);
+    context.strokeStyle = 'rgba(97,74,0,0.5)';
+    context.lineWidth = 1;
+    context.strokeRect(px + 0.5, py + 0.5, s - 1, s - 1);
+    // zigzag del relámpago
+    context.fillStyle = '#7a5c00';
+    context.beginPath();
+    context.moveTo(px + s * 0.55, py + s * 0.05);
+    context.lineTo(px + s * 0.25, py + s * 0.55);
+    context.lineTo(px + s * 0.45, py + s * 0.55);
+    context.lineTo(px + s * 0.35, py + s * 0.95);
+    context.lineTo(px + s * 0.75, py + s * 0.4);
+    context.lineTo(px + s * 0.55, py + s * 0.4);
+    context.closePath();
+    context.fill();
     context.globalAlpha = 1;
     return;
   }
@@ -317,7 +426,10 @@ function init() {
   dropInterval = 1000;
   dropAccum = 0;
   lastTime = performance.now();
-  next = randomPiece();
+  pieceCount = 0;
+  bombAt = BOMB_EVERY;
+  rayAt = 0;
+  next = nextPiece();
   spawn();
   updateHUD();
   overlay.classList.add('hidden');
